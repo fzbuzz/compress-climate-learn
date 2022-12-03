@@ -82,6 +82,86 @@ class ERA5(Dataset):
     def __len__(self):
         pass
 
+
+class ERA5CompressedForecasting(ERA5):
+    def __init__(self, root_dir, root_highres_dir, in_vars, out_vars, history, window, pred_range, years, subsample=1, split='train'):
+        print (f'Creating {split} dataset')
+        super().__init__(root_dir, root_highres_dir, in_vars, years, split)
+        
+        self.in_vars = list(self.data_dict.keys())
+        self.out_vars = out_vars
+        self.history = history
+        self.window = window
+        self.pred_range = pred_range
+
+        inp_data = xr.concat([self.data_dict[k] for k in self.in_vars], dim='level')
+        out_data = xr.concat([self.data_dict[k] for k in self.out_vars], dim='level')
+        self.inp_data = inp_data.to_numpy().astype(np.float32)
+        self.out_data = out_data.to_numpy().astype(np.float32)
+
+        constants_data = [self.constants[k].to_numpy().astype(np.float32) for k in self.constants.keys()]
+        if len(constants_data) > 0:
+            self.constants_data = np.stack(constants_data, axis=0) # 3, 32, 64
+        else:
+            self.constants_data = None
+
+        assert len(self.inp_data) == len(self.out_data)
+
+        self.downscale_ratio = 1
+
+        if split == 'train':
+            self.inp_transform = self.get_normalize(self.inp_data)
+            self.out_transform = self.get_normalize(self.out_data)
+            self.constant_transform = self.get_normalize(np.expand_dims(self.constants_data, axis=0)) if self.constants_data is not None else None
+        else:
+            self.inp_transform = None
+            self.out_transform = None
+            self.constant_transform = None
+
+        self.time = self.data_dict[in_vars[0]].time.to_numpy()[:-pred_range:subsample].copy()
+        self.inp_lon = self.data_dict[in_vars[0]].lon.to_numpy().copy()
+        self.inp_lat = self.data_dict[in_vars[0]].lat.to_numpy().copy()
+        self.out_lon = self.data_dict[out_vars[0]].lon.to_numpy().copy()
+        self.out_lat = self.data_dict[out_vars[0]].lat.to_numpy().copy()
+
+        del self.data_dict
+
+    def get_normalize(self, data):
+        mean = np.mean(data, axis=(0, 2, 3))
+        std = np.std(data, axis=(0, 2, 3))
+        return transforms.Normalize(mean, std)
+
+    def set_normalize(self, inp_normalize, out_normalize, constant_normalize): # for val and test
+        self.inp_transform = inp_normalize
+        self.out_transform = out_normalize
+        self.constant_transform = constant_normalize
+
+    def get_climatology(self):
+        return torch.from_numpy(self.out_data.mean(axis=0))
+
+    def create_inp_out(self, index):
+        inp = []
+        for i in range(self.history):
+            idx = index + self.window * i
+            inp.append(self.inp_data[idx])
+        inp = np.stack(inp, axis=0)
+        out_idx = index + (self.history - 1) * self.window + self.pred_range
+        out = self.out_data[out_idx]
+        return inp, out
+
+    def __getitem__(self, index):
+        inp, out = self.create_inp_out(index)
+        out = self.out_transform(torch.from_numpy(out)) # C, 32, 64
+        inp = self.inp_transform(torch.from_numpy(inp)) # T, C, 32, 64
+        if self.constants_data is not None:
+            constant = torch.from_numpy(self.constants_data).unsqueeze(0).repeat(inp.shape[0], 1, 1, 1)
+            constant = self.constant_transform(constant)
+            inp = torch.cat((inp, constant), dim=1)
+        return inp, out, self.in_vars + list(self.constants.keys()), self.out_vars
+
+    def __len__(self):
+        return len(self.inp_data) - ((self.history - 1) * self.window + self.pred_range)
+
 class ERA5Forecasting(ERA5):
     def __init__(self, root_dir, root_highres_dir, in_vars, out_vars, history, window, pred_range, years, subsample=1, split='train'):
         print (f'Creating {split} dataset')

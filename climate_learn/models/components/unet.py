@@ -90,7 +90,7 @@ class Unet(nn.Module):
 
         # Middle block
         self.middle = MiddleBlock(
-            out_channels, has_attn=mid_attn, activation=activation, norm=norm, dropout=dropout, mc_dropout=mc_dropout
+            out_channels, has_attn=mid_attn, activation=activation, norm=norm, dropout=dropout, mc_dropout=(self.prob_type == "mcdropout")
         )
 
         # #### Second half of U-Net - increasing resolution

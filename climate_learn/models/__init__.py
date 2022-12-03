@@ -1,5 +1,10 @@
 from .components import *
 from .modules import *
+from compressai.models import (
+    FactorizedPrior,
+    JointAutoregressiveHierarchicalPriors,
+    ScaleHyperprior,
+)
 
 def load_model(name, task, model_kwargs, optim_kwargs):
     if(name == "vit"):
@@ -8,6 +13,12 @@ def load_model(name, task, model_kwargs, optim_kwargs):
         model_cls = ResNet
     elif(name == "unet"):
         model_cls = Unet
+    elif(name == "factorized_prior"):
+        model_cls = FactorizedPrior
+    elif(name == "joint_prior"):
+        model_cls = JointAutoregressiveHierarchicalPriors
+    elif(name == "scale_prior"):
+        model_cls = ScaleHyperprior
 
     model = model_cls(**model_kwargs)
 
@@ -15,6 +26,8 @@ def load_model(name, task, model_kwargs, optim_kwargs):
         module = ForecastLitModule(model, **optim_kwargs)
     elif(task == 'downscaling'):
         module = DownscaleLitModule(model, **optim_kwargs)
+    elif(task == 'compression'):
+        module = CompressLitModule(model, **optim_kwargs)
     else:
         raise NotImplementedError("Only support foreacasting and downscaling")
     
